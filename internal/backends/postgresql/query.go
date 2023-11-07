@@ -63,9 +63,13 @@ func prepareSelectClause(schema, table string, capped, onlyRecordIDs bool) strin
 }
 
 // prepareWhereClause adds WHERE clause with given filters to the query and returns the query and arguments.
-func prepareWhereClause(p *metadata.Placeholder, sqlFilters *types.Document) (string, []any, error) {
+// It returns false if pushdown for at least one filter couldn't be applied.
+func prepareWhereClause(p *metadata.Placeholder, sqlFilters *types.Document) (string, []any, bool, error) {
 	var filters []string
 	var args []any
+	var filterPushdownAll bool
+
+	filterPushdownAll = true
 
 	iter := sqlFilters.Iterator()
 	defer iter.Close()
@@ -78,7 +82,7 @@ func prepareWhereClause(p *metadata.Placeholder, sqlFilters *types.Document) (st
 				break
 			}
 
-			return "", nil, lazyerrors.Error(err)
+			return "", nil, filterPushdownAll, lazyerrors.Error(err)
 		}
 
 		// Is the comment below correct? Does it also skip things like $or?
@@ -98,12 +102,13 @@ func prepareWhereClause(p *metadata.Placeholder, sqlFilters *types.Document) (st
 			// Handle dot notation.
 			// TODO https://github.com/FerretDB/FerretDB/issues/2069
 			if path.Len() > 1 {
+				filterPushdownAll = false
 				continue
 			}
 		case errors.As(err, &pe):
 			// ignore empty key error, otherwise return error
 			if pe.Code() != types.ErrPathElementEmpty {
-				return "", nil, lazyerrors.Error(err)
+				return "", nil, filterPushdownAll, lazyerrors.Error(err)
 			}
 		default:
 			panic("Invalid error type: PathError expected")
@@ -122,17 +127,25 @@ func prepareWhereClause(p *metadata.Placeholder, sqlFilters *types.Document) (st
 						break
 					}
 
-					return "", nil, lazyerrors.Error(err)
+					return "", nil, filterPushdownAll, lazyerrors.Error(err)
 				}
 
 				switch k {
 				case "$eq":
-					if f, a := filterEqual(p, rootKey, v); f != "" {
+					if f, a, e := filterEqual(p, rootKey, v); f != "" {
 						filters = append(filters, f)
 						args = append(args, a...)
+						// if equal filter is best-effort match, filter pushdown is not applied entirely
+						if !e {
+							filterPushdownAll = false
+						}
+					} else {
+						filterPushdownAll = false
 					}
 
 				case "$ne":
+					// $ne filter pushdown is best-effort match, filter pushdown is not applied entirely
+					filterPushdownAll = false
 					sql := `NOT ( ` +
 						// does document contain the key,
 						// it is necessary, as NOT won't work correctly if the key does not exist.
@@ -176,17 +189,25 @@ func prepareWhereClause(p *metadata.Placeholder, sqlFilters *types.Document) (st
 				default:
 					// $gt and $lt
 					// TODO https://github.com/FerretDB/FerretDB/issues/1875
+					filterPushdownAll = false
 					continue
 				}
 			}
 
 		case *types.Array, types.Binary, types.NullType, types.Regex, types.Timestamp:
 			// type not supported for pushdown
+			filterPushdownAll = false
 
 		case float64, string, types.ObjectID, bool, time.Time, int32, int64:
-			if f, a := filterEqual(p, rootKey, v); f != "" {
+			if f, a, e := filterEqual(p, rootKey, v); f != "" {
 				filters = append(filters, f)
 				args = append(args, a...)
+				// if equal filter is best-effort match, filter pushdown is not considered as applied entirely
+				if !e {
+					filterPushdownAll = false
+				}
+			} else {
+				filterPushdownAll = false
 			}
 
 		default:
@@ -199,24 +220,25 @@ func prepareWhereClause(p *metadata.Placeholder, sqlFilters *types.Document) (st
 		filter = ` WHERE ` + strings.Join(filters, " AND ")
 	}
 
-	return filter, args, nil
+	return filter, args, filterPushdownAll, nil
 }
 
 // prepareOrderByClause returns ORDER BY clause for given sort field and returns the query and arguments.
-//
+// It returns false if pushdown for provided field couldn't be applied.
+// Otherwise, if pushdown was applied, or field is nil, it returns true.
 // For capped collection, it returns ORDER BY recordID only if sort field is nil.
-func prepareOrderByClause(p *metadata.Placeholder, sort *backends.SortField, capped bool) (string, []any) {
+func prepareOrderByClause(p *metadata.Placeholder, sort *backends.SortField, capped bool) (string, []any, bool) {
 	if sort == nil {
 		if capped {
-			return fmt.Sprintf(" ORDER BY %s", metadata.RecordIDColumn), nil
+			return fmt.Sprintf(" ORDER BY %s", metadata.RecordIDColumn), nil, true
 		}
 
-		return "", nil
+		return "", nil, true
 	}
 
 	// Skip sorting dot notation
 	if strings.ContainsRune(sort.Key, '.') {
-		return "", nil
+		return "", nil, false
 	}
 
 	var order string
@@ -224,14 +246,16 @@ func prepareOrderByClause(p *metadata.Placeholder, sort *backends.SortField, cap
 		order = " DESC"
 	}
 
-	return fmt.Sprintf(" ORDER BY %s->%s%s", metadata.DefaultColumn, p.Next(), order), []any{sort.Key}
+	return fmt.Sprintf(" ORDER BY %s->%s%s", metadata.DefaultColumn, p.Next(), order), []any{sort.Key}, true
 }
 
 // filterEqual returns the proper SQL filter with arguments that filters documents
-// where the value under k is equal to v.
-func filterEqual(p *metadata.Placeholder, k string, v any) (filter string, args []any) {
+// where the value under k is equal to v, exactMatch returns true if the filter is exact match,
+// returns false if it is best-effort match.
+func filterEqual(p *metadata.Placeholder, k string, v any) (filter string, args []any, exactMatch bool) {
 	// Select if value under the key is equal to provided value.
 	sql := `%[1]s->%[2]s @> %[3]s`
+	exactMatch = false
 
 	switch v := v.(type) {
 	case *types.Document, *types.Array, types.Binary,
@@ -250,6 +274,7 @@ func filterEqual(p *metadata.Placeholder, k string, v any) (filter string, args 
 			v = -types.MaxSafeDouble
 		default:
 			// don't change the default eq query
+			exactMatch = true
 		}
 
 		filter = fmt.Sprintf(sql, metadata.DefaultColumn, p.Next(), p.Next())
@@ -257,11 +282,13 @@ func filterEqual(p *metadata.Placeholder, k string, v any) (filter string, args 
 
 	case string, types.ObjectID, time.Time:
 		// don't change the default eq query
+		exactMatch = true
 		filter = fmt.Sprintf(sql, metadata.DefaultColumn, p.Next(), p.Next())
 		args = append(args, k, string(must.NotFail(sjson.MarshalSingleValue(v))))
 
 	case bool, int32:
 		// don't change the default eq query
+		exactMatch = true
 		filter = fmt.Sprintf(sql, metadata.DefaultColumn, p.Next(), p.Next())
 		args = append(args, k, v)
 
@@ -279,6 +306,7 @@ func filterEqual(p *metadata.Placeholder, k string, v any) (filter string, args 
 			v = -maxSafeDouble
 		default:
 			// don't change the default eq query
+			exactMatch = true
 		}
 
 		filter = fmt.Sprintf(sql, metadata.DefaultColumn, p.Next(), p.Next())
