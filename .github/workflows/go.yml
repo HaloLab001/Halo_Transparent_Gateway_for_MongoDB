@@ -182,7 +182,7 @@ jobs:
         include:
           - { task: "mongodb", shard_index: 1, shard_total: 1 }
 
-    uses: ./.github/workflows/_integration.yml
+    uses: ./.github/workflows/_test-integration.yml
     with:
       task: ${{ matrix.task }}
       shard_index: ${{ matrix.shard_index }}
@@ -206,6 +206,83 @@ jobs:
         uses: coverallsapp/github-action@v2
         with:
           parallel-finished: true
+
+  bench-unit:
+    name: Bench unit
+    runs-on: server
+    timeout-minutes: 15
+
+    # Do not run this job in parallel for any PR change or branch push.
+    concurrency:
+      group: ${{ github.workflow }}-bench-unit-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
+
+    # don't run then in the main branch for now
+    if: >
+      contains(github.event.pull_request.labels.*.name, 'bench') &&
+      !contains(github.event.pull_request.labels.*.name, 'not ready')
+
+    steps:
+      - name: Setup permissions monitoring
+        uses: GitHubSecurityLab/actions-permissions/monitor@v1
+        if: false
+
+      # TODO https://github.com/FerretDB/github-actions/issues/211
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # for `git describe` to work
+          lfs: false # LFS is used only by website
+
+      - name: Setup Go
+        uses: FerretDB/github-actions/setup-go@main
+        with:
+          cache-key: bench-unit
+
+      - name: Install Task
+        run: go generate -x
+        working-directory: tools
+
+      - name: Run init
+        run: bin/task init
+
+      - name: Run benchmarks
+        run: bin/task bench-unit BENCH_TIME=1s
+        env:
+          GOFLAGS: ${{ runner.debug == '1' && '-v' || '' }}
+
+      # we don't want them on CI
+      - name: Clean test and fuzz caches
+        if: always()
+        run: go clean -testcache -fuzzcache
+
+      - name: Check dirty
+        run: |
+          git status
+          git diff --exit-code
+
+  bench-integration:
+    name: Benchmark ${{ matrix.task }}
+
+    # Do not run this job in parallel for any PR change or branch push
+    # to save some resources.
+    concurrency:
+      group: ${{ github.workflow }}-bench-${{ matrix.task }}-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
+
+    # don't run then in the main branch for now
+    if: >
+      contains(github.event.pull_request.labels.*.name, 'bench') &&
+      !contains(github.event.pull_request.labels.*.name, 'not ready')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [postgresql, sqlite, mongodb]
+
+    uses: ./.github/workflows/_bench-integration.yml
+    with:
+      task: ${{ matrix.task }}
 
   env-data:
     name: env-data
