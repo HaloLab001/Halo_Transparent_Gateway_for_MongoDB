@@ -2053,12 +2053,27 @@ func TestAggregateCompatProjectSum(t *testing.T) {
 				}}},
 			},
 		},
+		"Document": {
+			pipeline: bson.A{
+				bson.D{{"$project", bson.D{
+					{"sumtype", bson.D{{"$sum", bson.D{{"foo", "bar"}}}}},
+				}}},
+			},
+		},
 		"Type": {
 			pipeline: bson.A{
 				bson.D{{"$project", bson.D{
 					{"sumtype", bson.D{{"$sum", bson.D{{"$type", "$v"}}}}},
 				}}},
 			},
+		},
+		"RecursiveInvalidOperator": {
+			pipeline: bson.A{
+				bson.D{{"$project", bson.D{
+					{"sum", bson.D{{"$sum", bson.D{{"$invalid", "foo"}}}}},
+				}}},
+			},
+			resultType: emptyResult,
 		},
 		"RecursiveEmptyVariable": {
 			pipeline: bson.A{
