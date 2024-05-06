@@ -17,6 +17,7 @@ require (
 	golang.org/x/pkgsite v0.0.0-20240410165358-493d85e09e7f
 	golang.org/x/tools v0.20.0 // https://github.com/golang/go/issues/66259
 	golang.org/x/vuln v1.0.5-0.20240415194721-a7188c690e1d // https://github.com/golang/go/issues/66139
+  gopkg.in/yaml.v3 v3.0.1
 	mvdan.cc/gofumpt v0.6.0
 )
 
@@ -107,7 +108,6 @@ require (
 	golang.org/x/term v0.19.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/v3 v3.8.0 // indirect
 	rsc.io/markdown v0.0.0-20231214224604-88bb533a6020 // indirect
 )
