@@ -15,10 +15,13 @@
 package integration
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
 	"testing"
+
+	"go.opentelemetry.io/otel"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,6 +103,34 @@ func TestInsertFind(t *testing.T) {
 			AssertEqualDocuments(t, expected, actual[0])
 		})
 	}
+}
+
+func TestOtelComment(t *testing.T) {
+	ctx, collection := setup.Setup(t, shareddata.Scalars)
+
+	ctx, span := otel.Tracer("").Start(ctx, "TestOtelComment")
+	defer span.End()
+
+	traceData := struct {
+		TraceID [16]byte `json:"ferretTraceID"`
+		SpanID  [8]byte  `json:"ferretSpanID"`
+	}{
+		TraceID: [16]byte(span.SpanContext().TraceID()),
+		SpanID:  [8]byte(span.SpanContext().SpanID()),
+	}
+
+	comment, err := json.Marshal(traceData)
+	require.NoError(t, err)
+
+	traceDataDoc := bson.D{
+		{"ferretTraceID", span.SpanContext().TraceID()},
+		{"ferretSpanID", span.SpanContext().SpanID()},
+	}
+
+	var doc bson.D
+	opts := options.FindOne().SetComment(string(comment))
+	err = collection.FindOne(ctx, bson.D{{"_id", "string"}, {"$comment", traceDataDoc}}, opts).Decode(&doc)
+	require.NoError(t, err)
 }
 
 //nolint:paralleltest // we test a global list of databases
