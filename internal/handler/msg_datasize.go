@@ -19,21 +19,23 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/FerretDB/wire"
+
 	"github.com/FerretDB/FerretDB/internal/backends"
+	"github.com/FerretDB/FerretDB/internal/bson"
 	"github.com/FerretDB/FerretDB/internal/handler/common"
 	"github.com/FerretDB/FerretDB/internal/handler/handlererrors"
 	"github.com/FerretDB/FerretDB/internal/handler/handlerparams"
 	"github.com/FerretDB/FerretDB/internal/types"
 	"github.com/FerretDB/FerretDB/internal/util/lazyerrors"
 	"github.com/FerretDB/FerretDB/internal/util/must"
-	"github.com/FerretDB/FerretDB/internal/wire"
 )
 
 // MsgDataSize implements `dataSize` command.
 //
 // The passed context is canceled when the client connection is closed.
 func (h *Handler) MsgDataSize(connCtx context.Context, msg *wire.OpMsg) (*wire.OpMsg, error) {
-	document, err := msg.Document()
+	document, err := bson.OpMsgDocument(msg)
 	if err != nil {
 		return nil, lazyerrors.Error(err)
 	}
@@ -96,8 +98,7 @@ func (h *Handler) MsgDataSize(connCtx context.Context, msg *wire.OpMsg) (*wire.O
 		return nil, lazyerrors.Error(err)
 	}
 
-	var reply wire.OpMsg
-	must.NoError(reply.SetSections(wire.MakeOpMsgSection(
+	return bson.NewOpMsg(
 		must.NotFail(types.NewDocument(
 			"estimate", false,
 			"size", stats.SizeTotal,
@@ -105,7 +106,5 @@ func (h *Handler) MsgDataSize(connCtx context.Context, msg *wire.OpMsg) (*wire.O
 			"millis", int32(time.Since(started).Milliseconds()),
 			"ok", float64(1),
 		)),
-	)))
-
-	return &reply, nil
+	)
 }

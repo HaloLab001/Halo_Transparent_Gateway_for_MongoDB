@@ -17,19 +17,20 @@ package handler
 import (
 	"context"
 
+	"github.com/FerretDB/wire"
+
+	"github.com/FerretDB/FerretDB/internal/bson"
 	"github.com/FerretDB/FerretDB/internal/clientconn/conninfo"
 	"github.com/FerretDB/FerretDB/internal/handler/handlererrors"
 	"github.com/FerretDB/FerretDB/internal/types"
 	"github.com/FerretDB/FerretDB/internal/util/lazyerrors"
-	"github.com/FerretDB/FerretDB/internal/util/must"
-	"github.com/FerretDB/FerretDB/internal/wire"
 )
 
 // MsgIsMaster implements `isMaster` command.
 //
 // The passed context is canceled when the client connection is closed.
 func (h *Handler) MsgIsMaster(connCtx context.Context, msg *wire.OpMsg) (*wire.OpMsg, error) {
-	doc, err := msg.Document()
+	doc, err := bson.OpMsgDocument(msg)
 	if err != nil {
 		return nil, lazyerrors.Error(err)
 	}
@@ -39,10 +40,7 @@ func (h *Handler) MsgIsMaster(connCtx context.Context, msg *wire.OpMsg) (*wire.O
 		return nil, lazyerrors.Error(err)
 	}
 
-	var reply wire.OpMsg
-	must.NoError(reply.SetSections(wire.MakeOpMsgSection(res)))
-
-	return &reply, nil
+	return bson.NewOpMsg(res)
 }
 
 // checkClientMetadata checks if the message does not contain client metadata after it was received already.

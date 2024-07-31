@@ -22,14 +22,16 @@ import (
 	"math"
 	"testing"
 
+	"github.com/FerretDB/wire"
+	"github.com/FerretDB/wire/wirebson"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/FerretDB/FerretDB/internal/bson"
 	"github.com/FerretDB/FerretDB/internal/types"
 	"github.com/FerretDB/FerretDB/internal/util/must"
 	"github.com/FerretDB/FerretDB/internal/util/testutil"
 	"github.com/FerretDB/FerretDB/internal/util/testutil/testtb"
-	"github.com/FerretDB/FerretDB/internal/wire"
 )
 
 type testCase struct {
@@ -202,21 +204,23 @@ func addRecordedFuzzDocs(f *testing.F, needDocument, needSchema bool) int {
 
 		switch b := rec.Body.(type) {
 		case *wire.OpMsg:
-			doc, err := b.Document()
+			var doc *types.Document
+			doc, err = bson.OpMsgDocument(b)
 			require.NoError(f, err)
 			docs = append(docs, doc)
 
 		case *wire.OpQuery:
 			if doc := b.Query(); doc != nil {
-				docs = append(docs, doc)
-			}
-
-			if doc := b.ReturnFieldsSelector(); doc != nil {
-				docs = append(docs, doc)
+				docs = append(docs, must.NotFail(bson.TypesDocument(doc)))
 			}
 
 		case *wire.OpReply:
-			doc, err := b.Document()
+			var wDoc *wirebson.Document
+			wDoc, err = b.Document()
+			require.NoError(f, err)
+
+			var doc *types.Document
+			doc, err = bson.TypesDocument(wDoc)
 			require.NoError(f, err)
 
 			if doc != nil {

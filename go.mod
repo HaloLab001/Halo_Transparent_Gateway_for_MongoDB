@@ -6,10 +6,10 @@ toolchain go1.22.5
 
 require (
 	github.com/AlekSi/pointer v1.2.0
+	github.com/FerretDB/wire v0.0.5
 	github.com/SAP/go-hdb v1.10.1
 	github.com/alecthomas/kong v0.9.0
 	github.com/arl/statsviz v0.6.0
-	github.com/cristalhq/bson v0.0.8
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
